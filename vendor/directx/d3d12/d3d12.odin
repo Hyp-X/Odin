@@ -2836,11 +2836,15 @@ IStateObject_UUID_STRING :: "47016943-fca8-4594-93ea-af258b55346d"
 IStateObject_UUID := &IID{0x47016943, 0xfca8, 0x4594, {0x93, 0xea, 0xaf, 0x25, 0x8b, 0x55, 0x34, 0x6d}}
 IStateObject :: struct #raw_union {
 	#subtype id3d12pageable: IPageable,
+	using id3d12stateobject_vtable: ^IStateObject_VTable,
+}
+IStateObject_VTable :: struct {
+	using id3d12devicechild_vtable: IDeviceChild_VTable,
 }
 
 
 IStateObjectProperties_UUID_STRING :: "de5fa827-9bf9-4f26-89ff-d7f56fde3860"
-IStateObjectProperties_IID := &IID{0xde5fa827, 0x9bf9, 0x4f26, {0x89, 0xff, 0xd7, 0xf5, 0x6f, 0xde, 0x38, 0x60}}
+IStateObjectProperties_UUID := &IID{0xde5fa827, 0x9bf9, 0x4f26, {0x89, 0xff, 0xd7, 0xf5, 0x6f, 0xde, 0x38, 0x60}}
 IStateObjectProperties :: struct #raw_union {
 	#subtype iunknown: IUnknown,
 	using id3d12stateobjectproperties_vtable: ^IStateObjectProperties_VTable,
