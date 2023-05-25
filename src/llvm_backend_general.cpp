@@ -677,7 +677,7 @@ gb_internal void lb_addr_store(lbProcedure *p, lbAddr addr, lbValue value) {
 		return;
 	}
 	GB_ASSERT(value.type != nullptr);
-	if (is_type_untyped_undef(value.type)) {
+	if (is_type_untyped_uninit(value.type)) {
 		Type *t = lb_addr_type(addr);
 		value.type = t;
 		value.value = LLVMGetUndef(lb_type(p->module, t));
@@ -1498,6 +1498,9 @@ gb_internal LLVMTypeRef lb_type_internal_for_procedures_raw(lbModule *m, Type *t
 	type = base_type(original_type);
 	GB_ASSERT(type->kind == Type_Proc);
 
+	mutex_lock(&m->func_raw_types_mutex);
+	defer (mutex_unlock(&m->func_raw_types_mutex));
+
 	LLVMTypeRef *found = map_get(&m->func_raw_types, type);
 	if (found) {
 		return *found;
@@ -1825,7 +1828,7 @@ gb_internal LLVMTypeRef lb_type_internal(lbModule *m, Type *type) {
 		case Basic_UntypedString:     GB_PANIC("Basic_UntypedString"); break;
 		case Basic_UntypedRune:       GB_PANIC("Basic_UntypedRune"); break;
 		case Basic_UntypedNil:        GB_PANIC("Basic_UntypedNil"); break;
-		case Basic_UntypedUndef:      GB_PANIC("Basic_UntypedUndef"); break;
+		case Basic_UntypedUninit:     GB_PANIC("Basic_UntypedUninit"); break;
 		}
 		break;
 	case Type_Named:
@@ -2156,6 +2159,9 @@ gb_internal LLVMTypeRef lb_type_internal(lbModule *m, Type *type) {
 
 gb_internal LLVMTypeRef lb_type(lbModule *m, Type *type) {
 	type = default_type(type);
+
+	mutex_lock(&m->types_mutex);
+	defer (mutex_unlock(&m->types_mutex));
 
 	LLVMTypeRef *found = map_get(&m->types, type);
 	if (found) {

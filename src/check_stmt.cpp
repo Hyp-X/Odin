@@ -402,6 +402,12 @@ gb_internal Type *check_assignment_variable(CheckerContext *ctx, Operand *lhs, O
 
 	Type *assignment_type = lhs->type;
 
+	if (rhs->mode == Addressing_Type && is_type_polymorphic(rhs->type)) {
+		gbString t = type_to_string(rhs->type);
+		error(rhs->expr, "Invalid use of a non-specialized polymorphic type '%s'", t);
+		gb_string_free(t);
+	}
+
 	switch (lhs->mode) {
 	case Addressing_Invalid:
 		return nullptr;
@@ -2170,7 +2176,7 @@ gb_internal void check_return_stmt(CheckerContext *ctx, Ast *node) {
 	auto operands = array_make<Operand>(heap_allocator(), 0, 2*rs->results.count);
 	defer (array_free(&operands));
 
-	check_unpack_arguments(ctx, result_entities, result_count, &operands, rs->results, true, false);
+	check_unpack_arguments(ctx, result_entities, result_count, &operands, rs->results, UnpackFlag_AllowOk);
 
 	if (result_count == 0 && rs->results.count > 0) {
 		error(rs->results[0], "No return values expected");

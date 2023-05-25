@@ -8,8 +8,9 @@ struct ErrorCollector {
 	BlockingMutex     string_mutex;
 	RecursiveMutex    block_mutex;
 
-	Array<u8> error_buffer;
-	Array<String> errors;
+	RecursiveMutex error_buffer_mutex;
+	Array<u8>      error_buffer;
+	Array<String>  errors;
 };
 
 gb_global ErrorCollector global_error_collector;
@@ -119,6 +120,7 @@ gb_internal void begin_error_block(void) {
 }
 
 gb_internal void end_error_block(void) {
+	mutex_lock(&global_error_collector.error_buffer_mutex);
 	isize n = global_error_collector.error_buffer.count;
 	if (n > 0) {
 		u8 *text = global_error_collector.error_buffer.data;
@@ -150,11 +152,16 @@ gb_internal void end_error_block(void) {
 		text = gb_alloc_array(permanent_allocator(), u8, n+1);
 		gb_memmove(text, global_error_collector.error_buffer.data, n);
 		text[n] = 0;
+
+
+		mutex_lock(&global_error_collector.error_out_mutex);
 		String s = {text, n};
 		array_add(&global_error_collector.errors, s);
+		mutex_unlock(&global_error_collector.error_out_mutex);
+
 		global_error_collector.error_buffer.count = 0;
 	}
-
+	mutex_unlock(&global_error_collector.error_buffer_mutex);
 	global_error_collector.in_block.store(false);
 	mutex_unlock(&global_error_collector.block_mutex);
 }
@@ -172,11 +179,15 @@ gb_internal ERROR_OUT_PROC(default_error_out_va) {
 	isize len = gb_snprintf_va(buf, gb_size_of(buf), fmt, va);
 	isize n = len-1;
 	if (global_error_collector.in_block) {
+		mutex_lock(&global_error_collector.error_buffer_mutex);
+
 		isize cap = global_error_collector.error_buffer.count + n;
 		array_reserve(&global_error_collector.error_buffer, cap);
 		u8 *data = global_error_collector.error_buffer.data + global_error_collector.error_buffer.count;
 		gb_memmove(data, buf, n);
 		global_error_collector.error_buffer.count += n;
+
+		mutex_unlock(&global_error_collector.error_buffer_mutex);
 	} else {
 		mutex_lock(&global_error_collector.error_out_mutex);
 		{
@@ -436,6 +447,32 @@ gb_internal void syntax_error_va(TokenPos const &pos, TokenPos end, char const *
 	}
 }
 
+gb_internal void syntax_error_with_verbose_va(TokenPos const &pos, TokenPos end, char const *fmt, va_list va) {
+	global_error_collector.count.fetch_add(1);
+
+	mutex_lock(&global_error_collector.mutex);
+	// NOTE(bill): Duplicate error, skip it
+	if (pos.line == 0) {
+		error_out_coloured("Syntax_Error: ", TerminalStyle_Normal, TerminalColour_Red);
+		error_out_va(fmt, va);
+		error_out("\n");
+	} else if (global_error_collector.prev != pos) {
+		global_error_collector.prev = pos;
+		error_out_pos(pos);
+		if (has_ansi_terminal_colours()) {
+			error_out_coloured("Syntax_Error: ", TerminalStyle_Normal, TerminalColour_Red);
+		}
+		error_out_va(fmt, va);
+		error_out("\n");
+		show_error_on_line(pos, end);
+	}
+	mutex_unlock(&global_error_collector.mutex);
+	if (global_error_collector.count > MAX_ERROR_COLLECTOR_COUNT()) {
+		gb_exit(1);
+	}
+}
+
+
 gb_internal void syntax_warning_va(TokenPos const &pos, TokenPos end, char const *fmt, va_list va) {
 	if (global_warnings_as_errors()) {
 		syntax_error_va(pos, end, fmt, va);
@@ -514,6 +551,14 @@ gb_internal void syntax_warning(Token const &token, char const *fmt, ...) {
 	syntax_warning_va(token.pos, {}, fmt, va);
 	va_end(va);
 }
+
+gb_internal void syntax_error_with_verbose(TokenPos pos, TokenPos end, char const *fmt, ...) {
+	va_list va;
+	va_start(va, fmt);
+	syntax_error_with_verbose_va(pos, end, fmt, va);
+	va_end(va);
+}
+
 
 
 gb_internal void compiler_error(char const *fmt, ...) {

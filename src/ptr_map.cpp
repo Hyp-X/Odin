@@ -47,7 +47,7 @@ gb_internal gb_inline u32 ptr_map_hash_key(uintptr key) {
 	key = key ^ (key << 28);
 	res = cast(u32)key;
 #elif defined(GB_ARCH_32_BIT)
-	u32 state = ((u32)key) * 747796405u + 2891336453u;
+	u32 state = (cast(u32)key) * 747796405u + 2891336453u;
 	u32 word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
 	res = (word >> 22u) ^ word;
 #endif
@@ -114,7 +114,9 @@ gb_internal MapIndex map__add_entry(PtrMap<K, V> *h, K key) {
 	PtrMapEntry<K, V> e = {};
 	e.key = key;
 	e.next = MAP_SENTINEL;
-	map__reserve_entries(h, h->count+1);
+	if (h->count+1 >= h->entries_capacity) {
+		map__reserve_entries(h, gb_max(h->entries_capacity*2, 4));
+	}
 	h->entries[h->count++] = e;
 	return cast(MapIndex)(h->count-1);
 }
