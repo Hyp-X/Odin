@@ -239,6 +239,10 @@ gb_internal bool check_is_terminating(Ast *node, String const &label) {
 		return check_is_terminating(unparen_expr(es->expr), label);
 	case_end;
 
+	case_ast_node(bs, BranchStmt, node);
+		return bs->token.kind == Token_fallthrough;
+	case_end;
+
 	case_ast_node(is, IfStmt, node);
 		if (is->else_stmt != nullptr) {
 			if (check_is_terminating(is->body, label) &&
@@ -1461,6 +1465,7 @@ gb_internal void check_range_stmt(CheckerContext *ctx, Ast *node, u32 mod_flags)
 	bool is_map = false;
 	bool use_by_reference_for_value = false;
 	bool is_soa = false;
+	bool is_reverse = rs->reverse;
 
 	Ast *expr = unparen_expr(rs->expr);
 
@@ -1476,6 +1481,10 @@ gb_internal void check_range_stmt(CheckerContext *ctx, Ast *node, u32 mod_flags)
 		}
 		array_add(&vals, x.type);
 		array_add(&vals, t_int);
+
+		if (is_reverse) {
+			error(node, "#reverse for is not supported with ranges, prefer an explicit for loop with init, condition, and post arguments");
+		}
 	} else {
 		Operand operand = {Addressing_Invalid};
 		check_expr_base(ctx, &operand, expr, nullptr);
@@ -1488,6 +1497,9 @@ gb_internal void check_range_stmt(CheckerContext *ctx, Ast *node, u32 mod_flags)
 				gb_string_free(t);
 				goto skip_expr_range_stmt;
 			} else {
+				if (is_reverse) {
+					error(node, "#reverse for is not supported for enum types");
+				}
 				array_add(&vals, operand.type);
 				array_add(&vals, t_int);
 				add_type_info_type(ctx, operand.type);
@@ -1501,7 +1513,11 @@ gb_internal void check_range_stmt(CheckerContext *ctx, Ast *node, u32 mod_flags)
 				if (is_type_string(t) && t->Basic.kind != Basic_cstring) {
 					array_add(&vals, t_rune);
 					array_add(&vals, t_int);
-					add_package_dependency(ctx, "runtime", "string_decode_rune");
+					if (is_reverse) {
+						add_package_dependency(ctx, "runtime", "string_decode_last_rune");
+					} else {
+						add_package_dependency(ctx, "runtime", "string_decode_rune");
+					}
 				}
 				break;
 
@@ -1534,6 +1550,9 @@ gb_internal void check_range_stmt(CheckerContext *ctx, Ast *node, u32 mod_flags)
 				is_map = true;
 				array_add(&vals, t->Map.key);
 				array_add(&vals, t->Map.value);
+				if (is_reverse) {
+					error(node, "#reverse for is not supported for map types, as maps are unordered");
+				}
 				break;
 
 			case Type_Tuple:
@@ -1570,6 +1589,9 @@ gb_internal void check_range_stmt(CheckerContext *ctx, Ast *node, u32 mod_flags)
 						break;
 					}
 
+					if (is_reverse) {
+						error(node, "#reverse for is not supported for multiple return valued parameters");
+					}
 				}
 				break;
 

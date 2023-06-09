@@ -651,6 +651,9 @@ gb_internal bool check_vet_unused(Checker *c, Entity *e, VettedEntity *ve) {
 		case Entity_Variable:
 			if (e->scope->flags & (ScopeFlag_Global|ScopeFlag_Type|ScopeFlag_File)) {
 				return false;
+			} else if (e->flags & EntityFlag_Static) {
+				// ignore these for the time being
+				return false;
 			}
 		case Entity_ImportName:
 		case Entity_LibraryName:
@@ -912,6 +915,13 @@ gb_internal Type *add_global_type_name(Scope *scope, String const &type_name, Ty
 	return named_type;
 }
 
+gb_internal i64 odin_compile_timestamp(void) {
+	i64 us_after_1601 = cast(i64)gb_utc_time_now();
+	i64 us_after_1970 = us_after_1601 - 11644473600000000ll;
+	i64 ns_after_1970 = us_after_1970*1000ll;
+	return ns_after_1970;
+}
+
 
 gb_internal void init_universal(void) {
 	BuildContext *bc = &build_context;
@@ -971,13 +981,13 @@ gb_internal void init_universal(void) {
 
 	{
 		GlobalEnumValue values[TargetArch_COUNT] = {
-			{"Unknown", TargetArch_Invalid},
-			{"amd64",   TargetArch_amd64},
-			{"i386",    TargetArch_i386},
-			{"arm32",   TargetArch_arm32},
-			{"arm64",   TargetArch_arm64},
-			{"wasm32",  TargetArch_wasm32},
-			{"wasm64",  TargetArch_wasm64},
+			{"Unknown",   TargetArch_Invalid},
+			{"amd64",     TargetArch_amd64},
+			{"i386",      TargetArch_i386},
+			{"arm32",     TargetArch_arm32},
+			{"arm64",     TargetArch_arm64},
+			{"wasm32",    TargetArch_wasm32},
+			{"wasm64p32", TargetArch_wasm64p32},
 		};
 
 		auto fields = add_global_enum_type(str_lit("Odin_Arch_Type"), values, gb_count_of(values));
@@ -1000,8 +1010,6 @@ gb_internal void init_universal(void) {
 
 	{
 		GlobalEnumValue values[TargetEndian_COUNT] = {
-			{"Unknown", TargetEndian_Invalid},
-
 			{"Little",  TargetEndian_Little},
 			{"Big",     TargetEndian_Big},
 		};
@@ -1050,6 +1058,7 @@ gb_internal void init_universal(void) {
 
 	add_global_bool_constant("ODIN_VALGRIND_SUPPORT",         bc->ODIN_VALGRIND_SUPPORT);
 
+	add_global_constant("ODIN_COMPILE_TIMESTAMP", t_untyped_integer, exact_value_i64(odin_compile_timestamp()));
 
 
 // Builtin Procedures
@@ -3469,6 +3478,19 @@ gb_internal void check_decl_attributes(CheckerContext *c, Array<Ast *> const &at
 	StringSet set = {};
 	defer (string_set_destroy(&set));
 
+	bool is_runtime = false;
+	if (c->scope && c->scope->file && (c->scope->flags & ScopeFlag_File) &&
+	    c->scope->file->pkg &&
+	    c->scope->file->pkg->kind == Package_Runtime) {
+		is_runtime = true;
+	} else if (c->scope && c->scope->parent &&
+		(c->scope->flags & ScopeFlag_Proc) &&
+		(c->scope->parent->flags & ScopeFlag_File) &&
+		c->scope->parent->file->pkg &&
+		c->scope->parent->file->pkg->kind == Package_Runtime) {
+		is_runtime = true;
+	}
+
 	for_array(i, attributes) {
 		Ast *attr = attributes[i];
 		if (attr->kind != Ast_Attribute) continue;
@@ -3504,9 +3526,14 @@ gb_internal void check_decl_attributes(CheckerContext *c, Array<Ast *> const &at
 				continue;
 			}
 
+			if (name == "builtin" && is_runtime) {
+				continue;
+			}
+
 			if (!proc(c, elem, name, value, ac)) {
 				if (!build_context.ignore_unknown_attributes) {
 					error(elem, "Unknown attribute element name '%.*s'", LIT(name));
+					error_line("\tDid you forget to use build flag '-ignore-unknown-attributes'?\n");
 				}
 			}
 		}
@@ -3663,9 +3690,9 @@ gb_internal void check_builtin_attributes(CheckerContext *ctx, Entity *e, Array<
 					error(value, "'builtin' cannot have a field value");
 				}
 				// Remove the builtin tag
-				attr->Attribute.elems[k] = attr->Attribute.elems[attr->Attribute.elems.count-1];
-				attr->Attribute.elems.count -= 1;
-				k--;
+				// attr->Attribute.elems[k] = attr->Attribute.elems[attr->Attribute.elems.count-1];
+				// attr->Attribute.elems.count -= 1;
+				// k--;
 
 				mutex_unlock(&ctx->info->builtin_mutex);
 			}
@@ -3874,6 +3901,13 @@ gb_internal void check_collect_value_decl(CheckerContext *c, Ast *decl) {
 						cc = ProcCC_CDecl;
 						if (c->foreign_context.default_cc > 0) {
 							cc = c->foreign_context.default_cc;
+						} else if (is_arch_wasm()) {
+							begin_error_block();
+							error(init, "For wasm related targets, it is required that you either define the"
+							            " @(default_calling_convention=<string>) on the foreign block or"
+							            " explicitly assign it on the procedure signature");
+							error_line("\tSuggestion: when dealing with normal Odin code (e.g. js_wasm32), use \"contextless\"; when dealing with Emscripten like code, use \"c\"\n");
+							end_error_block();
 						}
 					}
 					e->Procedure.link_prefix = c->foreign_context.link_prefix;

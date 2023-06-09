@@ -666,7 +666,11 @@ gb_internal ExactValue exact_value_from_token(AstFile *f, Token const &token) {
 		}
 		break;
 	}
-	return exact_value_from_basic_literal(token.kind, s);
+	ExactValue value = exact_value_from_basic_literal(token.kind, s);
+	if (value.kind == ExactValue_Invalid) {
+		syntax_error(token, "Invalid token literal");
+	}
+	return value;
 }
 
 gb_internal String string_value_from_token(AstFile *f, Token const &token) {
@@ -3744,8 +3748,18 @@ gb_internal bool allow_field_separator(AstFile *f) {
 	if (allow_token(f, Token_Comma)) {
 		return true;
 	}
-	if (ALLOW_NEWLINE && token.kind == Token_Semicolon) {
-		if (!token_is_newline(token)) {
+	if (token.kind == Token_Semicolon) {
+		bool ok = false;
+		if (ALLOW_NEWLINE && token_is_newline(token)) {
+			TokenKind next = peek_token(f).kind;
+			switch (next) {
+			case Token_CloseBrace:
+			case Token_CloseParen:
+				ok = true;
+				break;
+			}
+		}
+		if (!ok) {
 			String p = token_to_string(token);
 			syntax_error(token_end_of_line(f, f->prev_token), "Expected a comma, got a %.*s", LIT(p));
 		}
@@ -4509,7 +4523,7 @@ gb_internal Ast *parse_foreign_decl(AstFile *f) {
 	return ast_bad_decl(f, token, f->curr_token);
 }
 
-gb_internal Ast *parse_attribute(AstFile *f, Token token, TokenKind open_kind, TokenKind close_kind) {
+gb_internal Ast *parse_attribute(AstFile *f, Token token, TokenKind open_kind, TokenKind close_kind, CommentGroup *docs) {
 	Array<Ast *> elems = {};
 	Token open = {};
 	Token close = {};
@@ -4550,6 +4564,9 @@ gb_internal Ast *parse_attribute(AstFile *f, Token token, TokenKind open_kind, T
 
 	Ast *decl = parse_stmt(f);
 	if (decl->kind == Ast_ValueDecl) {
+		if (decl->ValueDecl.docs == nullptr && docs != nullptr) {
+			decl->ValueDecl.docs = docs;
+		}
 		array_add(&decl->ValueDecl.attributes, attribute);
 	} else if (decl->kind == Ast_ForeignBlockDecl) {
 		array_add(&decl->ForeignBlockDecl.attributes, attribute);
@@ -4698,8 +4715,9 @@ gb_internal Ast *parse_stmt(AstFile *f) {
 	} break;
 
 	case Token_At: {
+		CommentGroup *docs = f->lead_comment;
 		Token token = expect_token(f, Token_At);
-		return parse_attribute(f, token, Token_OpenParen, Token_CloseParen);
+		return parse_attribute(f, token, Token_OpenParen, Token_CloseParen, docs);
 	}
 
 	case Token_Hash: {
@@ -4749,6 +4767,17 @@ gb_internal Ast *parse_stmt(AstFile *f) {
 			return stmt;
 		} else if (tag == "unroll") {
 			return parse_unrolled_for_loop(f, name);
+		} else if (tag == "reverse") {
+			Ast *for_stmt = parse_for_stmt(f);
+			if (for_stmt->kind == Ast_RangeStmt) {
+				if (for_stmt->RangeStmt.reverse) {
+					syntax_error(token, "#reverse already applied to a 'for in' statement");
+				}
+				for_stmt->RangeStmt.reverse = true;
+			} else {
+				syntax_error(token, "#reverse can only be applied to a 'for in' statement");
+			}
+			return for_stmt;
 		} else if (tag == "include") {
 			syntax_error(token, "#include is not a valid import declaration kind. Did you mean 'import'?");
 			s = ast_bad_stmt(f, token, f->curr_token);
