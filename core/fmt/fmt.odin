@@ -327,7 +327,7 @@ ctprintf :: proc(format: string, args: ..any) -> cstring {
 // Returns: A formatted string
 //
 sbprint :: proc(buf: ^strings.Builder, args: ..any, sep := " ") -> string {
-	wprint(strings.to_writer(buf), ..args, sep=sep)
+	wprint(strings.to_writer(buf), ..args, sep=sep, flush=true)
 	return strings.to_string(buf^)
 }
 // Formats and writes to a strings.Builder buffer using the default print settings
@@ -340,7 +340,7 @@ sbprint :: proc(buf: ^strings.Builder, args: ..any, sep := " ") -> string {
 // Returns: The resulting formatted string
 //
 sbprintln :: proc(buf: ^strings.Builder, args: ..any, sep := " ") -> string {
-	wprintln(strings.to_writer(buf), ..args, sep=sep)
+	wprintln(strings.to_writer(buf), ..args, sep=sep, flush=true)
 	return strings.to_string(buf^)
 }
 // Formats and writes to a strings.Builder buffer according to the specified format string
@@ -353,7 +353,7 @@ sbprintln :: proc(buf: ^strings.Builder, args: ..any, sep := " ") -> string {
 // Returns: The resulting formatted string
 //
 sbprintf :: proc(buf: ^strings.Builder, fmt: string, args: ..any) -> string {
-	wprintf(strings.to_writer(buf), fmt, ..args)
+	wprintf(strings.to_writer(buf), fmt, ..args, flush=true)
 	return strings.to_string(buf^)
 }
 // Formats and writes to an io.Writer using the default print settings
@@ -365,7 +365,7 @@ sbprintf :: proc(buf: ^strings.Builder, fmt: string, args: ..any) -> string {
 //
 // Returns: The number of bytes written
 //
-wprint :: proc(w: io.Writer, args: ..any, sep := " ") -> int {
+wprint :: proc(w: io.Writer, args: ..any, sep := " ", flush := true) -> int {
 	fi: Info
 	fi.writer = w
 
@@ -391,7 +391,9 @@ wprint :: proc(w: io.Writer, args: ..any, sep := " ") -> int {
 
 		fmt_value(&fi, args[i], 'v')
 	}
-	io.flush(auto_cast w)
+	if flush {
+		io.flush(w)
+	}
 
 	return fi.n
 }
@@ -404,7 +406,7 @@ wprint :: proc(w: io.Writer, args: ..any, sep := " ") -> int {
 //
 // Returns: The number of bytes written
 //
-wprintln :: proc(w: io.Writer, args: ..any, sep := " ") -> int {
+wprintln :: proc(w: io.Writer, args: ..any, sep := " ", flush := true) -> int {
 	fi: Info
 	fi.writer = w
 
@@ -416,7 +418,9 @@ wprintln :: proc(w: io.Writer, args: ..any, sep := " ") -> int {
 		fmt_value(&fi, args[i], 'v')
 	}
 	io.write_byte(fi.writer, '\n', &fi.n)
-	io.flush(auto_cast w)
+	if flush {
+		io.flush(w)
+	}
 	return fi.n
 }
 // Formats and writes to an io.Writer according to the specified format string
@@ -428,7 +432,7 @@ wprintln :: proc(w: io.Writer, args: ..any, sep := " ") -> int {
 //
 // Returns: The number of bytes written
 //
-wprintf :: proc(w: io.Writer, fmt: string, args: ..any) -> int {
+wprintf :: proc(w: io.Writer, fmt: string, args: ..any, flush := true) -> int {
 	fi: Info
 	arg_index: int = 0
 	end := len(fmt)
@@ -698,8 +702,9 @@ wprintf :: proc(w: io.Writer, fmt: string, args: ..any) -> int {
 		}
 		io.write_string(fi.writer, ")", &fi.n)
 	}
-
-	io.flush(auto_cast w)
+	if flush {
+		io.flush(w)
+	}
 
 	return fi.n
 }
@@ -711,9 +716,11 @@ wprintf :: proc(w: io.Writer, fmt: string, args: ..any) -> int {
 //
 // Returns: The number of bytes written and an io.Error if encountered
 //
-wprint_type :: proc(w: io.Writer, info: ^runtime.Type_Info) -> (int, io.Error) {
+wprint_type :: proc(w: io.Writer, info: ^runtime.Type_Info, flush := true) -> (int, io.Error) {
 	n, err := reflect.write_type(w, info)
-	io.flush(auto_cast w)
+	if flush {
+		io.flush(w)
+	}
 	return n, err
 }
 // Writes a typeid value to an io.Writer
@@ -724,9 +731,11 @@ wprint_type :: proc(w: io.Writer, info: ^runtime.Type_Info) -> (int, io.Error) {
 //
 // Returns: The number of bytes written and an io.Error if encountered
 //
-wprint_typeid :: proc(w: io.Writer, id: typeid) -> (int, io.Error) {
+wprint_typeid :: proc(w: io.Writer, id: typeid, flush := true) -> (int, io.Error) {
 	n, err := reflect.write_type(w, type_info_of(id))
-	io.flush(auto_cast w)
+	if flush {
+		io.flush(w)
+	}
 	return n, err
 }
 // Parses an integer from a given string starting at a specified offset
@@ -835,22 +844,22 @@ int_from_arg :: proc(args: []any, arg_index: int) -> (int, int, bool) {
 // - fi: A pointer to an Info structure
 // - verb: The invalid format verb
 //
-fmt_bad_verb :: proc(using fi: ^Info, verb: rune) {
+fmt_bad_verb :: proc(fi: ^Info, verb: rune) {
 	prev_in_bad := fi.in_bad
 	defer fi.in_bad = prev_in_bad
 	fi.in_bad = true
 
-	io.write_string(writer, "%!", &fi.n)
-	io.write_rune(writer, verb, &fi.n)
-	io.write_byte(writer, '(', &fi.n)
-	if arg.id != nil {
-		reflect.write_typeid(writer, arg.id, &fi.n)
-		io.write_byte(writer, '=', &fi.n)
-		fmt_value(fi, arg, 'v')
+	io.write_string(fi.writer, "%!", &fi.n)
+	io.write_rune(fi.writer, verb, &fi.n)
+	io.write_byte(fi.writer, '(', &fi.n)
+	if fi.arg.id != nil {
+		reflect.write_typeid(fi.writer, fi.arg.id, &fi.n)
+		io.write_byte(fi.writer, '=', &fi.n)
+		fmt_value(fi, fi.arg, 'v')
 	} else {
-		io.write_string(writer, "<nil>", &fi.n)
+		io.write_string(fi.writer, "<nil>", &fi.n)
 	}
-	io.write_byte(writer, ')', &fi.n)
+	io.write_byte(fi.writer, ')', &fi.n)
 }
 // Formats a boolean value according to the specified format verb
 //
@@ -859,7 +868,7 @@ fmt_bad_verb :: proc(using fi: ^Info, verb: rune) {
 // - b: The boolean value to format
 // - verb: The format verb
 //
-fmt_bool :: proc(using fi: ^Info, b: bool, verb: rune) {
+fmt_bool :: proc(fi: ^Info, b: bool, verb: rune) {
 	switch verb {
 	case 't', 'v':
 		fmt_string(fi, b ? "true" : "false", 's')
@@ -1565,7 +1574,7 @@ fmt_bit_set :: proc(fi: ^Info, v: any, name: string = "") {
 // - fi: A pointer to the Info structure where the indents will be written.
 //
 fmt_write_indent :: proc(fi: ^Info) {
-	for in 0..<fi.indent {
+	for _ in 0..<fi.indent {
 		io.write_byte(fi.writer, '\t', &fi.n)
 	}
 }
@@ -1720,7 +1729,7 @@ fmt_struct :: proc(fi: ^Info, v: any, the_verb: rune, info: runtime.Type_Info_St
 	}
 	defer {
 		if hash {
-			for in 0..<indent { io.write_byte(fi.writer, '\t', &fi.n) }
+			for _ in 0..<indent { io.write_byte(fi.writer, '\t', &fi.n) }
 		}
 		io.write_byte(fi.writer, ']' if is_soa else '}', &fi.n)
 	}
@@ -1956,7 +1965,7 @@ fmt_named :: proc(fi: ^Info, v: any, verb: rune, info: runtime.Type_Info_Named) 
 		for x := i; x >= 10; x /= 10 {
 			n -= 1
 		}
-		for in 0..<n {
+		for _ in 0..<n {
 			io.write_byte(fi.writer, '0', &fi.n)
 		}
 		io.write_i64(fi.writer, i, 10, &fi.n)
@@ -1989,7 +1998,7 @@ fmt_named :: proc(fi: ^Info, v: any, verb: rune, info: runtime.Type_Info_Named) 
 			v := v
 			w := len(buf)
 			print := false
-			for in 0..<prec {
+			for _ in 0..<prec {
 				digit := v % 10
 				print = print || digit != 0
 				if print {
@@ -2535,32 +2544,11 @@ fmt_value :: proc(fi: ^Info, v: any, verb: rune) {
 
 		fmt_value(fi, absolute_ptr, verb)
 
-	case runtime.Type_Info_Relative_Slice:
+	case runtime.Type_Info_Relative_Multi_Pointer:
 		ptr := reflect.relative_pointer_to_absolute_raw(v.data, info.base_integer.id)
+		absolute_ptr := any{ptr, info.pointer.id}
 
-		if verb == 'p' {
-			fmt_pointer(fi, ptr, 'p')
-		} else if ptr == nil {
-			io.write_string(fi.writer, "[]", &fi.n)
-		} else {
-			len_ptr := uintptr(v.data) + uintptr(info.base_integer.size)
-			len_any := any{rawptr(len_ptr), info.base_integer.id}
-			len, _ := reflect.as_int(len_any)
-			slice_type := reflect.type_info_base(info.slice).variant.(runtime.Type_Info_Slice)
-
-			fi.record_level += 1
-			defer fi.record_level -= 1
-
-			io.write_byte(fi.writer, '[', &fi.n)
-			defer io.write_byte(fi.writer, ']', &fi.n)
-
-			for i in 0..<len {
-				if i > 0 { io.write_string(fi.writer, ", ", &fi.n) }
-
-				data := uintptr(ptr) + uintptr(i*slice_type.elem_size)
-				fmt_arg(fi, any{rawptr(data), slice_type.elem.id}, verb)
-			}
-		}
+		fmt_value(fi, absolute_ptr, verb)
 
 	case runtime.Type_Info_Matrix:
 		fmt_matrix(fi, v, verb, info)
